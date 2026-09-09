@@ -270,7 +270,10 @@ async function requestTokens(spec, providerId, params) {
     headers["Content-Type"] = "application/x-www-form-urlencoded";
     body = new URLSearchParams(bodyParams).toString();
   }
-  const response = await fetch(spec.tokenUrl, { method: "POST", headers, body });
+  // Chromium 网络栈沿用系统代理；Node 全局 fetch 不会自动读取系统代理。
+  // 延迟加载，保留纯 Node 环境 require 插件入口的能力；调用发生在 app ready 后。
+  const { net } = require("electron");
+  const response = await net.fetch(spec.tokenUrl, { method: "POST", headers, body });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`${PROVIDERS[providerId].displayName} token 请求失败：HTTP ${response.status} ${sanitizeLogText(text.slice(0, 240))}`);
