@@ -44,7 +44,9 @@ function uniqueModels(models) {
 }
 
 async function fetchJson(url, headers) {
-  const response = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(15_000) });
+  // 延迟加载 Electron，使用支持系统代理的 Chromium 网络栈。
+  const { net } = require("electron");
+  const response = await net.fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(15_000) });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);

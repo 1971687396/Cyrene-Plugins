@@ -147,7 +147,9 @@ async function handleChatCompletions(req, res, endpoint) {
 
     log(`[proxy] ${model} → ${providerId} ${endpoint.upstream.split("?")[0]} (stream=${Boolean(body.stream)})`);
 
-    const upstream = await fetch(endpoint.upstream, {
+    // 本地 6231 只负责接收请求；上游须经 Chromium 网络栈沿用系统代理。
+    const { net } = require("electron");
+    const upstream = await net.fetch(endpoint.upstream, {
       method: "POST",
       headers,
       body: JSON.stringify(upstreamBody),
