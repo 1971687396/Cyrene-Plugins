@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "features": [
+    "查看 CPU、内存、GPU、电池和系统运行时长",
+    "按盘符查询磁盘容量和已用空间",
+    "打开实时状态面板，查看 CPU、GPU、内存、磁盘、网络流量和电池图表",
+    "可直接询问昔涟电脑占用、电量、运行时长或指定磁盘空间"
+  ],
+  "requirements": [
+    "需要 Windows 和支持插件的 Cyrene 版本",
+    "GPU 监测依赖系统可用的 NVIDIA 工具或 WMI 性能计数器；不可用时会省略 GPU 信息"
+  ],
+  "setup": [
+    "在 Cyrene 插件市场安装并启用插件",
+    "直接询问昔涟电脑占用、电量或指定盘符的磁盘空间",
+    "在插件列表中打开状态面板查看实时图表"
+  ],
+  "dataHandling": [
+    "只读查询本机系统信息，不修改系统配置或用户文件",
+    "通过 PowerShell、WMI 和可用的 NVIDIA 工具读取指标，不访问网络，也不上传遥测数据"
+  ],
+  "documentationUrl": "https://github.com/Playa-Cyrene/Cyrene-Plugins/blob/main/plugins/system-status/README.md"
+}
