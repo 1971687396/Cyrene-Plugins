@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "features": [
+    "将游戏内聊天接入 Cyrene 对话，让昔涟以游戏角色身份交流",
+    "支持查看坐标、生命值、饥饿值、背包和近期聊天，并可移动、跟随、采集、合成、耕作与交易",
+    "可用自然语言委托多步骤游戏目标，并在游戏聊天中汇报进度",
+    "支持饥饿进食、受攻击反击或逃跑等本能行为，可切换胆小模式"
+  ],
+  "requirements": [
+    "需要支持插件的 Cyrene 版本和可用的 LLM 服务",
+    "需要可连接的 Minecraft Java 版离线模式服务器；服务器地址和端口由你提供"
+  ],
+  "setup": [
+    "在 Cyrene 插件市场安装并启用插件",
+    "打开插件配置面板，填写服务器地址、端口和游戏角色名，然后连接",
+    "在 Minecraft 游戏聊天中和昔涟对话，或在 Cyrene 里让她执行移动、采集等游戏目标"
+  ],
+  "dataHandling": [
+    "仅连接你在配置面板中填写的 Minecraft 服务器；插件使用离线登录，不收集账号密码",
+    "游戏聊天和角色状态会进入 Cyrene 对话，并由当前配置的模型服务处理",
+    "服务器连接配置和胆小模式偏好保存在 Cyrene 插件私有存储中"
+  ],
+  "documentationUrl": "https://github.com/Playa-Cyrene/Cyrene-Plugins/tree/main/plugins/minecraft-bot"
+}
