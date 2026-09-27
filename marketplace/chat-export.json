@@ -20,5 +20,5 @@
     "插件不联网，也不收集遥测数据",
     "HTML 导出会将图片附件以内嵌形式保存；图片较多时文件会更大"
   ],
-  "documentationUrl": "https://gitee.com/playa0/cyrene-plugins/tree/main/plugins/chat-export"
+  "documentationUrl": "https://github.com/Playa-Cyrene/Cyrene-Plugins/tree/main/plugins/chat-export"
 }
