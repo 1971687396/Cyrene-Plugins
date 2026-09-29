@@ -124,12 +124,26 @@ Windows 上，读取 Qoder 的登录态需要解开 Chromium 的 OSCrypt 密钥�
 - **Trae 国际版未做端到端实测**：开发机上没有该区域的登录，代码路径与国内版共用，
   但国际版走的是订阅计费分支，未经真实账号验证。
 
-## 与 Pi 版本的关系
+## 源码
 
-本插件的协议层复用自 DeepSeek Harness 插件 `@eghrhegpe/dsh-connect-qoder` 与
-`dsh-connect-trae`（经由它们的 Pi 移植版），改动集中在宿主适配层：凭据与缓存根路径改为
-由宿主注入、移除 Pi 专属的 provider 注册、用量与签到改为返回结构化数据。
-逐项归属与改动说明见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+协议层复用自 DeepSeek Harness 插件 `@eghrhegpe/dsh-connect-qoder` 与 `dsh-connect-trae`
+（均为 MIT），经由它们在 Pi coding agent 上的移植版。
+
+本插件的完整源码（入口、面板、用量与签到、构建脚本）与 Pi 版共用同一个仓库：
+
+**https://github.com/citie114514/pi-connect/tree/main/cyrene/ide-account-bridge**
+
+相对协议层只改了三处：凭据与缓存根路径改为由宿主注入、移除 Pi 专属的 provider 注册、
+用量与签到改为返回结构化数据。逐项归属与改动说明见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+
+## 目录内文件说明
+
+| 文件 | 用途 |
+| --- | --- |
+| `manifest.json` | 插件清单 |
+| `index.cjs` | 入口（esbuild 打包的 CommonJS，自包含） |
+| `panel/index.html`、`panel/panel.js` | 配置面板：由 `open()` 以 `BrowserWindow` 加载，展示各区域端点与模型、提供刷新/额度/签到按钮 |
+| `THIRD_PARTY_NOTICES.md` | 上游 MIT 归属与改动说明 |
 
 ## 许可
 

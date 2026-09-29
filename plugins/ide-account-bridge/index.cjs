@@ -34,7 +34,7 @@ __export(entry_exports, {
 module.exports = __toCommonJS(entry_exports);
 var import_node_path6 = require("node:path");
 
-// src/qoder/runtime-pi.js
+// src/qoder/runtime.js
 var import_node_path4 = require("node:path");
 
 // src/qoder/lib/credentials.js
@@ -2191,7 +2191,7 @@ var CatalogStore = class {
   }
 };
 
-// src/qoder/runtime-pi.js
+// src/qoder/runtime.js
 var RegionRuntime = class {
   constructor(region, logger, cacheRoot) {
     this.region = region;
@@ -4614,7 +4614,7 @@ function toCheckin(status) {
   };
 }
 
-// src/trae/runtime-pi.js
+// src/trae/runtime.js
 var REGION_KEYS = ["cn", "ai"];
 var RegionStack = class {
   constructor(region, logger) {
