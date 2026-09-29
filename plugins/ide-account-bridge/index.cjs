@@ -5091,6 +5091,7 @@ var plugin = {
         try {
           const credential = await runtime.resolveCredential();
           if (!isCredentialUsable(credential)) continue;
+          await runtime.refreshCatalog();
           await runtime.ensureShim();
         } catch (error) {
           logger.warn(`qoder ${runtime.region.id}: shim \u542F\u52A8\u5931\u8D25`, error instanceof Error ? error.message : String(error));
@@ -5113,6 +5114,13 @@ var plugin = {
     });
     ctx.registerIpc(IPC.STATE, () => readState());
     ctx.registerIpc(IPC.REFRESH, async () => {
+      for (const runtime of qoderRuntimes) {
+        try {
+          await runtime.refreshCatalog();
+        } catch (error) {
+          logger.warn(`qoder ${runtime.region.id}: \u6A21\u578B\u76EE\u5F55\u5237\u65B0\u5931\u8D25`, error instanceof Error ? error.message : String(error));
+        }
+      }
       await warm();
       return readState();
     });
