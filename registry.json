@@ -132,6 +132,14 @@
       "zip": "https://gitee.com/playa0/cyrene-plugins/raw/main/zips/xiaomi-health-0.5.3.zip",
       "sha256": "d2189ef19db0a75c3a5c963c4c64d5730c5f6220541c3fd8a383aefa20e789b7",
       "downloads": 0
+    },
+    {
+      "id": "ide-account-bridge",
+      "name": "IDE 账号桥接（Qoder / Trae）",
+      "description": "复用本机已登录的 Qoder 与 Trae 桌面账号，向 Cyrene 提供 OpenAI 兼容的本地端点，无需 OAuth 或粘贴 API Key；附额度查看与每日签到。",
+      "author": "citie114514",
+      "homepage": "https://github.com/citie114514/pi-connect/tree/main/cyrene/ide-account-bridge",
+      "version": "1.0.0"
     }
   ]
 }
