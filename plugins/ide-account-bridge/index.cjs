@@ -39,11 +39,13 @@ var import_node_path4 = require("node:path");
 
 // src/qoder/lib/credentials.js
 var import_node_child_process = require("node:child_process");
+var import_node_util = require("node:util");
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
 var import_node_path = require("node:path");
 var import_node_crypto = require("node:crypto");
 var import_node_sqlite = require("node:sqlite");
+var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var USER_INFO_KEY = "secret://aicoding.auth.userInfo";
 var USER_PLAN_KEY = "secret://aicoding.auth.userPlan";
 var CREDIT_USAGE_KEY = "secret://aicoding.auth.creditUsage";
@@ -160,7 +162,7 @@ function reportCleanupFailure(message) {
 process.on("exit", () => {
   for (const cached of keyCache.values()) cached?.fill(0);
 });
-function oscryptKeyFor(appDir) {
+async function oscryptKeyFor(appDir) {
   if (keyCache.has(appDir)) return keyCache.get(appDir);
   let key;
   let lastFailure;
@@ -173,7 +175,7 @@ function oscryptKeyFor(appDir) {
       dir = (0, import_node_fs.mkdtempSync)((0, import_node_path.join)((0, import_node_os.tmpdir)(), "qoder-oscrypt-"));
       (0, import_node_fs.writeFileSync)((0, import_node_path.join)(dir, OSCRYPT_MARKER), "");
       const outFile = (0, import_node_path.join)(dir, "key.b64");
-      (0, import_node_child_process.execFileSync)(
+      await execFileAsync(
         systemPowershell(),
         ["-NoProfile", "-NonInteractive", "-Command", DPAPI_SCRIPT],
         {
@@ -416,11 +418,11 @@ function loadNewCredential(region, appDir, oscryptKey) {
     usage: void 0
   };
 }
-function loadCredential(region, appDataRoot) {
+async function loadCredential(region, appDataRoot) {
   for (const appName of region.newAppNames ?? []) {
     const appDir = (0, import_node_path.join)(appDataRoot, appName);
     if (!(0, import_node_fs.existsSync)(appDir)) continue;
-    const oscryptKey = oscryptKeyFor(appDir);
+    const oscryptKey = await oscryptKeyFor(appDir);
     if (oscryptKey === void 0) continue;
     const credential = safeRead(() => loadNewCredential(region, appDir, oscryptKey));
     if (credential !== void 0) return credential;
@@ -428,7 +430,7 @@ function loadCredential(region, appDataRoot) {
   for (const appName of region.appNames) {
     const appDir = (0, import_node_path.join)(appDataRoot, appName);
     if (!(0, import_node_fs.existsSync)(appDir)) continue;
-    const oscryptKey = oscryptKeyFor(appDir);
+    const oscryptKey = await oscryptKeyFor(appDir);
     if (oscryptKey === void 0) continue;
     for (const dbPath of stateDbCandidates(appDir)) {
       if (!(0, import_node_fs.existsSync)(dbPath)) continue;
@@ -569,8 +571,8 @@ function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
 // src/qoder/lib/credential-cache.js
 var CredentialCache = class {
   /**
-   * @param options.loadApp - `() => credential | undefined`, reading the app's store.
-   * @param options.loadEnv - `() => credential | undefined`, the PAT fallback.
+   * @param options.loadApp - `() => credential | undefined | Promise<...>`, reading the app's store.
+   * @param options.loadEnv - `() => credential | undefined | Promise<...>`, the PAT fallback.
    * @param options.exchangePat - `(credential) => { token, refreshToken, expiresAt }`,
    *   called only for a PAT source; absent when PATs are not supported.
    */
@@ -599,8 +601,8 @@ var CredentialCache = class {
     }
     if (isCredentialUsable(this.cached)) return this.cached;
     this.reads += 1;
-    const fromApp = this.loadApp();
-    const credential = fromApp ?? this.loadEnv();
+    const fromApp = await this.loadApp();
+    const credential = fromApp ?? await this.loadEnv();
     if (credential === void 0) {
       this.cached = void 0;
       return void 0;
@@ -825,6 +827,7 @@ var QUEUE_WAIT_BUDGET_MS = 12e4;
 var QUEUE_WAIT_MAX_SLEEP_MS = 3e4;
 var QUEUE_WAIT_MIN_SLEEP_MS = 1e3;
 var ATTEMPT_TIMEOUT_MS = 6e4;
+var CATALOG_TIMEOUT_MS = 3e4;
 function sleep(ms, signal) {
   return new Promise((resolve) => {
     if (signal?.aborted) {
@@ -966,14 +969,19 @@ function openApiHeaders(credential, region) {
     ...umidHeadersFor(region)
   };
 }
-var umidInfo;
+var umidInfoByRegion = /* @__PURE__ */ new Map();
 function umidHeadersFor(region) {
-  if (umidInfo === void 0) umidInfo = readUmidInfo(region);
-  if (umidInfo === null) return {};
+  const key = region?.id ?? "";
+  let info = umidInfoByRegion.get(key);
+  if (info === void 0) {
+    info = readUmidInfo(region);
+    umidInfoByRegion.set(key, info);
+  }
+  if (info === null) return {};
   return {
-    "Cosy-MachineToken": umidInfo.machineToken,
-    "Cosy-MachineCode": umidInfo.machineCode,
-    "Cosy-MachineType": umidInfo.machineType
+    "Cosy-MachineToken": info.machineToken,
+    "Cosy-MachineCode": info.machineCode,
+    "Cosy-MachineType": info.machineType
   };
 }
 function normalizeUmidBlock(answer) {
@@ -1186,7 +1194,8 @@ async function fetchModels(region, credential, signal) {
     method: "GET",
     headers: { Accept: "application/json", ...headers },
     redirect: "error",
-    signal
+    // Never `undefined`: an unbounded fetch here can outlive the caller.
+    signal: signal ?? AbortSignal.timeout(CATALOG_TIMEOUT_MS)
   });
   if (!response.ok) {
     throw new Error(`Qoder model list failed: HTTP ${response.status} ${(await response.text()).slice(0, 300)}`);
@@ -2294,7 +2303,7 @@ var import_node_os2 = require("node:os");
 var import_node_http2 = require("node:http");
 var import_node_stream = require("node:stream");
 var import_node_child_process3 = require("node:child_process");
-var import_node_util = require("node:util");
+var import_node_util2 = require("node:util");
 var FALLBACK_TRAE_MODELS = [
   {
     id: "DeepSeek-V4-Flash-Official",
@@ -3589,7 +3598,7 @@ function createTraeShim(options) {
           return writeError2(res, 400, "invalid_json", "Request body must be valid JSON");
         }
         const parsed = JSON.parse(raw);
-        options.logger?.warn("dsh-connect-trae: chat request received", {
+        options.logger?.info("dsh-connect-trae: chat request received", {
           model: parsed.model,
           messages: Array.isArray(parsed.messages) ? parsed.messages.map((message) => typeof message === "object" && message !== null ? message["role"] ?? "?" : "?") : "(none)",
           toolCount: Array.isArray(parsed.tools) ? parsed.tools.length : 0,
@@ -4336,7 +4345,7 @@ var TraeSoloRemoteCatalogClient = class {
     return models;
   }
 };
-var execFileAsync = (0, import_node_util.promisify)(import_node_child_process3.execFile);
+var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process3.execFile);
 var TraeDelegatingUpstreamClient = class {
   delegate;
   constructor(delegate) {
@@ -4973,6 +4982,7 @@ var IPC = {
   USAGE: "usage",
   CHECKIN: "checkin"
 };
+var WARM_TIMEOUT_MS = 3e4;
 var WINDOW_WIDTH = 780;
 var WINDOW_HEIGHT = 640;
 var REGION_LABEL3 = {
@@ -5086,58 +5096,71 @@ var plugin = {
     } catch (error) {
       logger.error("Trae \u8FD0\u884C\u65F6\u521D\u59CB\u5316\u5931\u8D25", error instanceof Error ? error.message : String(error));
     }
-    const warm = async () => {
-      for (const runtime of qoderRuntimes) {
-        try {
-          const credential = await runtime.resolveCredential();
-          if (!isCredentialUsable(credential)) continue;
-          await runtime.refreshCatalog();
-          await runtime.ensureShim();
-        } catch (error) {
-          logger.warn(`qoder ${runtime.region.id}: shim \u542F\u52A8\u5931\u8D25`, error instanceof Error ? error.message : String(error));
+    const deadline = () => AbortSignal.any([ctx.signal, AbortSignal.timeout(WARM_TIMEOUT_MS)]);
+    let warmPromise = Promise.resolve();
+    const startWarm = () => {
+      warmPromise = (async () => {
+        for (const runtime of qoderRuntimes) {
+          try {
+            const credential = await runtime.resolveCredential();
+            if (!isCredentialUsable(credential)) continue;
+            await runtime.refreshCatalog(deadline());
+            await runtime.ensureShim();
+          } catch (error) {
+            logger.warn(`qoder ${runtime.region.id}: \u9884\u70ED\u5931\u8D25`, error instanceof Error ? error.message : String(error));
+          }
         }
-      }
-      for (const stack of traeStacks) {
-        try {
-          const credential = await stack.store.resolve().catch(() => void 0);
-          if (credential === void 0) continue;
-          await stack.ensureReady();
-        } catch (error) {
-          logger.warn(`trae ${stack.region}: shim \u542F\u52A8\u5931\u8D25`, error instanceof Error ? error.message : String(error));
+        for (const stack of traeStacks) {
+          try {
+            const credential = await stack.store.resolve().catch(() => void 0);
+            if (credential === void 0) continue;
+            await stack.ensureReady();
+          } catch (error) {
+            logger.warn(`trae ${stack.region}: \u9884\u70ED\u5931\u8D25`, error instanceof Error ? error.message : String(error));
+          }
         }
-      }
+      })();
+      return warmPromise;
     };
-    await warm();
+    startWarm();
     const readState = () => ({
       pluginId: PLUGIN_ID,
       regions: [...qoderRuntimes.map(qoderRegionState), ...traeStacks.map(traeRegionState)]
     });
-    ctx.registerIpc(IPC.STATE, () => readState());
+    let checkinInFlight = null;
+    const runCheckin = () => {
+      if (checkinInFlight !== null) return checkinInFlight;
+      checkinInFlight = (async () => ({
+        qoder: await qoderCheckin(qoderRuntimes, deadline()),
+        trae: await traeCheckin(traeStacks)
+      }))().finally(() => {
+        checkinInFlight = null;
+      });
+      return checkinInFlight;
+    };
+    ctx.registerIpc(IPC.STATE, async () => {
+      await warmPromise;
+      return readState();
+    });
     ctx.registerIpc(IPC.REFRESH, async () => {
-      for (const runtime of qoderRuntimes) {
-        try {
-          await runtime.refreshCatalog();
-        } catch (error) {
-          logger.warn(`qoder ${runtime.region.id}: \u6A21\u578B\u76EE\u5F55\u5237\u65B0\u5931\u8D25`, error instanceof Error ? error.message : String(error));
-        }
-      }
-      await warm();
+      await startWarm();
       return readState();
     });
     ctx.registerIpc(IPC.USAGE, async () => ({
       qoder: await qoderUsage(qoderRuntimes, ctx.signal),
       trae: await traeUsage(traeStacks)
     }));
-    ctx.registerIpc(IPC.CHECKIN, async () => ({
-      qoder: await qoderCheckin(qoderRuntimes, ctx.signal),
-      trae: await traeCheckin(traeStacks)
-    }));
+    ctx.registerIpc(IPC.CHECKIN, () => runCheckin());
     ctx.registerTool({
       id: `${PLUGIN_ID}_usage`,
       name: "\u67E5\u8BE2 IDE \u8D26\u53F7\u989D\u5EA6",
-      description: "\u8BFB\u53D6\u672C\u673A\u5DF2\u767B\u5F55\u7684 Qoder \u4E0E Trae \u8D26\u53F7\u7684\u989D\u5EA6\u3001\u4FC3\u9500\u6D3B\u52A8\u4E0E\u4ECA\u65E5\u7B7E\u5230\u72B6\u6001\u3002\u53EA\u8BFB\u64CD\u4F5C\uFF0C\u4E0D\u4F1A\u6539\u52A8\u4EFB\u4F55\u8D26\u53F7\u72B6\u6001\u3002",
+      description: "\u8BFB\u53D6\u672C\u673A\u5DF2\u767B\u5F55\u7684 Qoder \u4E0E Trae \u8D26\u53F7\u7684\u989D\u5EA6\u3001\u4FC3\u9500\u6D3B\u52A8\u4E0E\u4ECA\u65E5\u7B7E\u5230\u72B6\u6001\u3002\u53EA\u8BFB\u64CD\u4F5C\uFF0C\u4E0D\u4F1A\u6539\u52A8\u4EFB\u4F55\u8D26\u53F7\u72B6\u6001\u3002\u8BFB\u53D6 Qoder \u51ED\u636E\u65F6\u4F1A\u542F\u52A8\u5B50\u8FDB\u7A0B\uFF08\u7CFB\u7EDF DPAPI \u89E3\u5BC6\u3001\u4EE5\u53CA Qoder \u5B89\u88C5\u76EE\u5F55\u4E0B\u7684 runtime-info.exe\uFF09\uFF0C\u5E76\u8BBF\u95EE\u5BF9\u5E94\u5382\u5546\u7684\u63A5\u53E3\u3002",
       category: "provider",
-      risk: "network",
+      // `shell`, not `network`: reading a Qoder credential spawns PowerShell for
+      // the DPAPI unwrap and the vendor's own runtime-info.exe, so the approval
+      // prompt must describe a subprocess rather than a plain request. `risk` is
+      // a single value, so the network access is stated in the description.
+      risk: "shell",
       effectKind: "read",
       verificationPolicy: "none",
       enabled: true,
@@ -5179,10 +5202,12 @@ ${render(trae)}`;
     ctx.registerTool({
       id: `${PLUGIN_ID}_checkin`,
       name: "\u9886\u53D6 IDE \u8D26\u53F7\u6BCF\u65E5\u7B7E\u5230\u989D\u5EA6",
-      description: "\u5411\u672C\u673A\u5DF2\u767B\u5F55\u7684 Qoder / Trae \u8D26\u53F7\u9886\u53D6\u4ECA\u65E5\u7B7E\u5230\u989D\u5EA6\u3002\u8FD9\u662F\u672C\u63D2\u4EF6\u552F\u4E00\u4F1A\u6539\u52A8\u8D26\u53F7\u72B6\u6001\u7684\u64CD\u4F5C\uFF0C\u4F1A\u5148\u8BFB\u53D6\u72B6\u6001\uFF0C\u5DF2\u9886\u53D6\u8FC7\u7684\u4E0D\u4F1A\u91CD\u590D\u8BF7\u6C42\u3002\u5FC5\u987B\u663E\u5F0F\u4F20\u5165 confirm=true \u624D\u4F1A\u6267\u884C\u3002",
+      description: "\u5411\u672C\u673A\u5DF2\u767B\u5F55\u7684 Qoder / Trae \u8D26\u53F7\u9886\u53D6\u4ECA\u65E5\u7B7E\u5230\u989D\u5EA6\u3002\u8FD9\u662F\u672C\u63D2\u4EF6\u552F\u4E00\u4F1A\u6539\u52A8\u8D26\u53F7\u72B6\u6001\u7684\u64CD\u4F5C\uFF0C\u4F1A\u5148\u8BFB\u53D6\u72B6\u6001\uFF0C\u5DF2\u9886\u53D6\u8FC7\u7684\u4E0D\u4F1A\u91CD\u590D\u8BF7\u6C42\u3002\u5FC5\u987B\u663E\u5F0F\u4F20\u5165 confirm=true \u624D\u4F1A\u6267\u884C\u3002\u8BFB\u53D6 Qoder \u51ED\u636E\u65F6\u4F1A\u542F\u52A8\u5B50\u8FDB\u7A0B\uFF08\u7CFB\u7EDF DPAPI \u89E3\u5BC6\u3001\u4EE5\u53CA Qoder \u5B89\u88C5\u76EE\u5F55\u4E0B\u7684 runtime-info.exe\uFF09\uFF0C\u5E76\u8BBF\u95EE\u5BF9\u5E94\u5382\u5546\u7684\u63A5\u53E3\u3002",
       category: "provider",
-      // Changes state on the upstream account, so it cannot be declared read-only.
-      risk: "network",
+      // Changes state on the upstream account, and reaches it through the same
+      // subprocess-spawning credential path as `_usage`, so it is declared
+      // `shell` rather than `network`. See the note on `_usage`.
+      risk: "shell",
       effectKind: "external_side_effect",
       verificationPolicy: "none",
       enabled: true,
@@ -5200,8 +5225,8 @@ ${render(trae)}`;
         if (args.confirm !== true) {
           return "\u672A\u6267\u884C\uFF1A\u9886\u53D6\u7B7E\u5230\u4F1A\u6539\u52A8\u8D26\u53F7\u72B6\u6001\uFF0C\u9700\u8981 confirm=true \u660E\u786E\u786E\u8BA4\u3002";
         }
-        const [qoder, trae] = [await qoderCheckin(qoderRuntimes, void 0), await traeCheckin(traeStacks)];
-        return [...qoder, ...trae].map((row) => `${row.label}\uFF1A${row.message}`).join("\n");
+        const result = await runCheckin();
+        return [...result.qoder, ...result.trae].map((row) => `${row.label}\uFF1A${row.message}`).join("\n");
       }
     });
     winManager = createWindowManager(logger);
@@ -5229,9 +5254,10 @@ ${render(trae)}`;
       qoderRuntimes = [];
       traeStacks = [];
     });
-    logger.info(
-      `\u5DF2\u542F\u7528\uFF1A${readState().regions.filter((r) => r.ready).map((r) => r.regionId).join(", ") || "\u672C\u673A\u6CA1\u6709\u5DF2\u767B\u5F55\u7684 Qoder / Trae \u8D26\u53F7"}`
-    );
+    warmPromise.then(() => {
+      const ready = readState().regions.filter((r) => r.ready).map((r) => r.regionId);
+      logger.info(`\u5DF2\u542F\u7528\uFF1A${ready.join(", ") || "\u672C\u673A\u6CA1\u6709\u5DF2\u767B\u5F55\u7684 Qoder / Trae \u8D26\u53F7"}`);
+    });
   },
   async unregister() {
   },

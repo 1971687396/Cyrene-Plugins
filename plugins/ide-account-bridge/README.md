@@ -3,7 +3,7 @@
 把本机**已经登录**的 Qoder 与 Trae 桌面账号接进 Cyrene，不用走 OAuth，也不用去网页上申请
 API Key —— 装好插件，把面板给出的 Base URL 和 token 填进模型档案就能用。
 
-支持四个区域，登录哪个出现哪个：
+支持四个区域。**未登录的区域会在面板上显示为「未登录」，且不启动服务、不占用端口**：
 
 | 区域 | provider | 上游 |
 | --- | --- | --- |
@@ -94,19 +94,35 @@ Cyrene 模型档案（OpenAI 兼容）
 **写入**（只写插件自己的存储目录，由宿主分配）：
 
 - Qoder 模型目录缓存 —— 只含模型元数据，**不含任何令牌**
-- Trae 刷新后的凭据副本（`.trae-auth.<区域>.json`）—— **这是一个明文 JSON 文件，内含 `accessToken` 与 `refreshToken`**。Trae 的 access token 有有效期，刷新后写一份副本，这样两个区域同时登录时不会互相覆盖；文件以 `0600`（仅当前用户可读写）创建。请知悉它等同于一枚可用的账号令牌，落在 `ctx.storage.rootDir()` 之下。该设计继承自上游 DSH 插件，本插件未做改动。
+- Trae 刷新后的凭据副本（`.trae-auth.<区域>.json`）—— **这是一个明文 JSON 文件，内含 `accessToken` 与 `refreshToken`**。Trae 的 access token 有有效期，刷新后写一份副本，这样两个区域同时登录时不会互相覆盖。写入时传入 `mode: 0o600`，但请注意：**POSIX 平台才会以 0600 创建；Windows 会忽略该参数**，实际权限继承自 `ctx.storage.rootDir()` 所在目录的 ACL。请知悉它等同于一枚可用的账号令牌，落在插件的存储目录之下。该设计继承自上游 DSH 插件，本插件未做改动。
 
 插件**不会**写入 Qoder / Trae 应用自己的任何文件。
 
 ## 子进程
 
-Windows 上，读取 Qoder 的登录态需要解开 Chromium 的 OSCrypt 密钥，而这一步只能通过
-**系统 DPAPI** 完成。插件用 `execFileSync` 启动一次 `powershell.exe`，传入一段固定的、
-不含任何用户输入的内联脚本，由它调用 `ProtectedData.Unprotect` 解出密钥，结果经临时文件回传。
+读取 Qoder 凭据的过程会启动**两个**子进程，都在读取登录态时发生，都不接受任何用户输入。
+
+**其一：`powershell.exe`（解 OSCrypt 密钥）**
+
+Windows 上解开 Chromium 的 OSCrypt 密钥只能通过**系统 DPAPI**。插件用 `execFileSync` 启动一次
+`powershell.exe`，传入一段固定的、不含任何用户输入的内联脚本，由它调用
+`ProtectedData.Unprotect` 解出密钥，结果经临时文件回传。
 
 - 脚本内容是常量，不拼接任何外部数据，不存在命令注入面
 - 仅在 Windows 上执行；其他平台走不同的分支
 - 调用是同步的，每次运行只解一次（结果有缓存）
+
+**其二：厂商自带的 `runtime-info.exe`（取机器标识）**
+
+Qoder 的部分接口需要一个机器标识，由 Qoder 自己安装目录下的
+`<install>\resources\umid\runtime-info.exe` 生成。插件以 `execFileSync` 执行它：
+
+- **无参数**调用（`execFileSync(binary, [], …)`），5 秒超时，`stdio` 只保留 stdout 管道
+- 不走 shell（没有 `shell: true`），参数不来自用户输入，无注入面
+- 执行的是**厂商安装目录下的可执行文件**，不是插件自带的二进制
+- 二进制不存在或超时都会降级为「无机器标识」，不阻塞其余功能
+
+两处调用的实际动作与工具的 `risk: "shell"` 声明一致。
 
 ## 已知限制与风险
 
