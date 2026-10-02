@@ -67,9 +67,11 @@ Cyrene 昔涟官方插件收录仓库：开发者通过 Pull Request 提交插�
 
 ---
 
-## 维护者：下载量与 Gitee 同步
+## 维护者：发布与 Gitee 同步
 
-`.github/workflows/aggregate-downloads.yml` 每天统计 GitHub Release 附件下载量，更新 `registry.json` 后将当前 `main` 同步到 Gitee，避免客户端主源与 GitHub 索引不一致。
+完整的发布步骤见 [review-checklist.md](./review-checklist.md) 的「七、发布流程」：打包 ZIP → 放行 `.gitignore` 白名单 → 回写 `registry.json` 与 README 直链 → 推送 `main` → 触发 Gitee 同步并校验 sha256。
+
+`.github/workflows/aggregate-downloads.yml` 每天把当前 `main` 同步到 Gitee，避免客户端主源与 GitHub 索引不一致（其下载量统计走 GitHub Release 附件，而现行分发用 Gitee raw 直链，因此 `downloads` 目前只是占位字段）。
 
 首次启用前，需要在 GitHub 仓库的 **Settings → Secrets and variables → Actions** 新建仓库 Secret：
 
@@ -97,9 +99,10 @@ Cyrene-Plugins/
 │       ├── index.cjs     # 编译后的入口
 │       └── README.md     # 插件说明
 ├── scripts/
-│   ├── publish-plugins.ps1     # 发布脚本（维护者工具：合并 PR 后打包并发布 GitHub Release）
+│   ├── publish-plugins.ps1     # 早期发布脚本（GitHub Release 方案，已废弃，勿用）
 │   └── aggregate-downloads.mjs # 下载量聚合脚本（GitHub Action 每日自动运行）
 ├── registry.json         # 收录索引（插件元数据登记处）
+├── marketplace/          # 可选的插件详情弹窗数据（按插件 ID 单独维护）
 ├── CONTRIBUTING.md       # 提交规范（面向插件开发者）
 └── review-checklist.md   # 审核清单（面向维护者，也可供提交者自查）
 ```

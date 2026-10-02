@@ -56,14 +56,74 @@
 
 ---
 
-## 七、收录流程（维护者）
+## 七、发布流程（维护者）
 
-审核通过合并后：
+审核通过并合并 PR 后，按下面的顺序发布。**ZIP 一律由维护者从审核过的 `plugins/<插件id>/` 源码打包，不接受提交者上传的包。**
 
-1. 在仓库根目录执行 `powershell -ExecutionPolicy Bypass -File scripts/build-zips.ps1`，重新生成全部 ZIP
-2. 核对 `zips/<插件id>-<版本>.zip` 与 `plugins/<插件id>/` 内容一致
-3. 更新 `registry.json` 各条目的 `zip` 字段与 `updatedAt`，并补全 README「已收录插件」表格该行「直接下载」列的 ZIP 链接
-4. 将 ZIP 与索引变更一并提交
+### 1. 打包
+
+在仓库根目录把插件目录整体压成 ZIP，**保留一层插件目录**（与 GitHub 「Download ZIP」形态一致，宿主导入逻辑依赖这个层级）：
+
+```powershell
+Compress-Archive -Path plugins/<插件id> -DestinationPath zips/<插件id>-<版本>.zip -Force
+```
+
+核对 `zips/<插件id>-<版本>.zip` 解出的内容与 `plugins/<插件id>/` 完全一致（自包含检查见「五、产物检查」）。
+
+### 2. 放行 ZIP 入库
+
+`zips/` 默认整体忽略，只放行 registry 当前正在分发的版本。在 `.gitignore` 的 `zips/*` 白名单里为这个新包加一行：
+
+```gitignore
+!zips/<插件id>-<版本>.zip
+```
+
+发新版时把上一版的白名单行删掉，避免历史包继续占用仓库体积。
+
+### 3. 回写索引与直链
+
+- `registry.json`：该条目的 `version` 改为新版本，补 `zip` 与 `sha256`，并把 `downloads` 置 `0`（缺失该字段的条目会被市场客户端整条丢弃）；顶层 `updatedAt` 改为当天
+- README「已收录插件」表格：更新该行的版本与简介，并把「直接下载」列填成 ZIP 链接
+
+`zip` 字段与 README 直链统一使用 **Gitee raw 直链**（客户端主源在 Gitee，且 GitHub 大文件下载不稳定）：
+
+```text
+https://gitee.com/playa0/cyrene-plugins/raw/main/zips/<插件id>-<版本>.zip
+```
+
+`sha256` 用下面命令生成，全小写：
+
+```powershell
+(Get-FileHash zips/<插件id>-<版本>.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+```
+
+### 4. 提交并推送
+
+```powershell
+git add zips/<插件id>-<版本>.zip registry.json README.md .gitignore
+git commit -m "发布 <插件id> <版本>：补 registry 下载地址与 README 直链"
+git push origin HEAD:main
+```
+
+### 5. 同步 Gitee 并校验
+
+**Gitee 镜像只在每天北京时间 04:00 由 Actions 自动同步**，刚推完直链会 404。想立刻生效就手动触发一次：
+
+```powershell
+gh workflow run aggregate-downloads.yml --repo Playa-Cyrene/Cyrene-Plugins
+```
+
+同步完成后从 Gitee 拉回 ZIP 校验，确认镜像与本地一致再算发布完成：
+
+```powershell
+Invoke-WebRequest "https://gitee.com/playa0/cyrene-plugins/raw/main/zips/<插件id>-<版本>.zip" -OutFile "$env:TEMP\verify.zip"
+(Get-FileHash "$env:TEMP\verify.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+```
+
+### 说明
+
+- `scripts/publish-plugins.ps1` 是早期的 GitHub Release 方案，与现行的 Gitee 直链分发不一致，**不要再执行**（它会把 `zip` 写成 Release 附件地址）
+- `scripts/aggregate-downloads.mjs` 统计的是 GitHub Release 附件下载次数，仓库改用 Gitee 直链后该口径已失效，`downloads` 目前只是占位字段
 
 ---
 

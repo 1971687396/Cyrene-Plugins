@@ -23,7 +23,7 @@ plugins/
 3. **manifest 必须通过校验**：用 SDK 自带的 `validateManifest` 校验（见下文「开发流程」第 3 步）
 4. **目录名 = manifest 的 `id`**：全小写连字符，如 `weather-tool`
 5. **单插件单 PR**：一个 PR 只收录一个插件；已有插件的版本更新也单独提 PR
-6. **不要上传 ZIP**：安装包由维护者在合并后从审核过的源码统一打包，发布为 GitHub Release 附件，提交者上传的 ZIP 不会被采用
+6. **不要上传 ZIP**：安装包由维护者在合并后从审核过的源码统一打包分发，提交者上传的 ZIP 不会被采用
 
 ---
 
@@ -55,7 +55,7 @@ mv index.js index.cjs
 
 1. Fork 本仓库
 2. 在 `plugins/` 下新建你的插件目录（自包含产物）
-3. 在 `registry.json` 的 `plugins` 数组中登记（`zip` / `sha256` / `downloads` 字段由维护者发布 Release 时补齐，提交者无需填写）：
+3. 在 `registry.json` 的 `plugins` 数组中登记（`zip` / `sha256` / `downloads` 字段由维护者合并打包后补齐，提交者无需填写）：
 
 ```json
 {
@@ -67,6 +67,8 @@ mv index.js index.cjs
   "homepage": "https://github.com/you/my-plugin-src"
 }
 ```
+
+3a. 可选：在 `marketplace/<插件id>.json` 中补充详情弹窗内容，字段格式见 [marketplace/README.md](./marketplace/README.md)。这里填写功能、要求、使用方法和数据处理说明；无需重复 `registry.json` 中已有的基础信息。
 
 4. 在 [README.md](./README.md) 的「已收录插件」表格末尾添加一行：填写插件链接（`./plugins/<你的插件id>`）、版本、一句话简介与开发者（你的名字或 GitHub ID）；「直接下载」列留空，由维护者合并打包后补上 ZIP 链接；如有源码仓库，把仓库地址填在「原仓库」列，没有则留 —
 5. PR 标题格式：`[插件] <插件id> <版本>`（新收录）或 `[更新] <插件id> <旧版本> → <新版本>`
@@ -94,7 +96,7 @@ mv index.js index.cjs
 
 ## 五、版本更新
 
-- 已收录插件发新版：更新插件目录内产物 + `manifest.json` 的 `version` + `registry.json` 对应条目（新 Release 由维护者统一发布）
+- 已收录插件发新版：更新插件目录内产物 + `manifest.json` 的 `version` + `registry.json` 对应条目（`zip` / `sha256` 与 README 直链由维护者合并打包后统一补齐）
 - 同步更新 README「已收录插件」表格中该插件的版本与简介
 - version 必须递增（SemVer），同名同版本不可重复收录
 - 行为有破坏性变化（配置格式、工具参数变更）请在 README 顶部的更新说明中写清迁移方法
