@@ -32,18 +32,123 @@ __export(entry_exports, {
   default: () => entry_default
 });
 module.exports = __toCommonJS(entry_exports);
-var import_node_path6 = require("node:path");
+var import_node_path7 = require("node:path");
+
+// src/endpoints.js
+var import_node_fs = require("node:fs");
+var import_node_path = require("node:path");
+var import_node_crypto = require("node:crypto");
+var FORMAT_VERSION = 1;
+var PORT_RANGE_START = 43110;
+var PORT_RANGE_SIZE = 40;
+function createEndpointStore({ path, logger } = {}) {
+  let entries = {};
+  const claimedInProcess = /* @__PURE__ */ new Set();
+  const load = () => {
+    const tmp = `${path}.tmp`;
+    try {
+      if ((0, import_node_fs.existsSync)(tmp)) (0, import_node_fs.unlinkSync)(tmp);
+    } catch {
+    }
+    if (!(0, import_node_fs.existsSync)(path)) return;
+    try {
+      const parsed = JSON.parse((0, import_node_fs.readFileSync)(path, "utf8"));
+      if (parsed?.version !== FORMAT_VERSION || typeof parsed.entries !== "object" || parsed.entries === null) return;
+      entries = parsed.entries;
+    } catch (error) {
+      logger?.warn?.("ide-account-bridge: \u7AEF\u70B9\u7F13\u5B58\u65E0\u6CD5\u89E3\u6790\uFF0C\u5C06\u91CD\u65B0\u751F\u6210", error instanceof Error ? error.message : String(error));
+    }
+  };
+  const save = () => {
+    try {
+      (0, import_node_fs.mkdirSync)((0, import_node_path.dirname)(path), { recursive: true });
+      const tmp = `${path}.tmp`;
+      (0, import_node_fs.writeFileSync)(tmp, JSON.stringify({ version: FORMAT_VERSION, entries }, null, 2), { encoding: "utf8", mode: 384 });
+      (0, import_node_fs.renameSync)(tmp, path);
+    } catch (error) {
+      logger?.warn?.("ide-account-bridge: \u7AEF\u70B9\u7F13\u5B58\u5199\u5165\u5931\u8D25\uFF08\u7AEF\u53E3\u4E0E token \u5C06\u65E0\u6CD5\u8DE8\u91CD\u542F\u4FDD\u6301\uFF09", error instanceof Error ? error.message : String(error));
+    }
+  };
+  load();
+  const recordFor = (regionId) => {
+    const existing = entries[regionId];
+    return existing !== void 0 && typeof existing === "object" && existing !== null ? existing : {};
+  };
+  return {
+    /**
+     * The bearer token for a region, minted once and then reused.
+     *
+     * @param regionId - the region id (`qoder-cn`, `qoder`, `cn`, `ai`).
+     * @returns a stable token.
+     */
+    tokenFor(regionId) {
+      const record2 = recordFor(regionId);
+      if (typeof record2.token === "string" && record2.token.length > 0) return record2.token;
+      const token = (0, import_node_crypto.randomBytes)(32).toString("base64url");
+      entries[regionId] = { ...record2, token };
+      save();
+      return token;
+    },
+    /**
+     * A port to try first, so a stable port is reused across restarts.
+     *
+     * Deterministic per region rather than stored, so a region that has never
+     * started still gets a sensible first guess; the caller records whatever it
+     * actually binds. `recordPort` is what makes it stick.
+     *
+     * Ports handed out earlier in this process are skipped: the two groups
+     * (Qoder, Trae) number their regions from zero independently, so without
+     * this the second group's first region would collide with the first group's
+     * and fall back to a random port on a fresh install.
+     *
+     * @param regionId - the region id.
+     * @param index - the region's position within its own group.
+     * @returns a port number to attempt.
+     */
+    preferredPortFor(regionId, index = 0) {
+      const record2 = recordFor(regionId);
+      if (typeof record2.port === "number" && Number.isInteger(record2.port) && record2.port > 1024 && record2.port <= 65535) {
+        claimedInProcess.add(record2.port);
+        return record2.port;
+      }
+      for (let step = 0; step < PORT_RANGE_SIZE; step += 1) {
+        const candidate = PORT_RANGE_START + (index + step) % PORT_RANGE_SIZE;
+        if (!claimedInProcess.has(candidate)) {
+          claimedInProcess.add(candidate);
+          return candidate;
+        }
+      }
+      return 0;
+    },
+    /**
+     * Remember the port that actually bound, so the next start reuses it.
+     *
+     * @param regionId - the region id.
+     * @param port - the bound port.
+     */
+    recordPort(regionId, port) {
+      const record2 = recordFor(regionId);
+      if (record2.port === port) return;
+      entries[regionId] = { ...record2, port };
+      save();
+    },
+    /** Everything currently known, for diagnostics. */
+    snapshot() {
+      return JSON.parse(JSON.stringify(entries));
+    }
+  };
+}
 
 // src/qoder/runtime.js
-var import_node_path4 = require("node:path");
+var import_node_path5 = require("node:path");
 
 // src/qoder/lib/credentials.js
 var import_node_child_process = require("node:child_process");
 var import_node_util = require("node:util");
-var import_node_fs = require("node:fs");
+var import_node_fs2 = require("node:fs");
 var import_node_os = require("node:os");
-var import_node_path = require("node:path");
-var import_node_crypto = require("node:crypto");
+var import_node_path2 = require("node:path");
+var import_node_crypto2 = require("node:crypto");
 var import_node_sqlite = require("node:sqlite");
 var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var USER_INFO_KEY = "secret://aicoding.auth.userInfo";
@@ -166,15 +271,15 @@ async function oscryptKeyFor(appDir) {
   if (keyCache.has(appDir)) return keyCache.get(appDir);
   let key;
   let lastFailure;
-  const statePath = (0, import_node_path.join)(appDir, "Local State");
-  if (!(0, import_node_fs.existsSync)(statePath)) {
+  const statePath = (0, import_node_path2.join)(appDir, "Local State");
+  if (!(0, import_node_fs2.existsSync)(statePath)) {
     lastFailure = "no Local State file";
   } else {
     let dir;
     try {
-      dir = (0, import_node_fs.mkdtempSync)((0, import_node_path.join)((0, import_node_os.tmpdir)(), "qoder-oscrypt-"));
-      (0, import_node_fs.writeFileSync)((0, import_node_path.join)(dir, OSCRYPT_MARKER), "");
-      const outFile = (0, import_node_path.join)(dir, "key.b64");
+      dir = (0, import_node_fs2.mkdtempSync)((0, import_node_path2.join)((0, import_node_os.tmpdir)(), "qoder-oscrypt-"));
+      (0, import_node_fs2.writeFileSync)((0, import_node_path2.join)(dir, OSCRYPT_MARKER), "");
+      const outFile = (0, import_node_path2.join)(dir, "key.b64");
       await execFileAsync(
         systemPowershell(),
         ["-NoProfile", "-NonInteractive", "-Command", DPAPI_SCRIPT],
@@ -185,7 +290,7 @@ async function oscryptKeyFor(appDir) {
           env: unwrapEnv(appDir, outFile)
         }
       );
-      const text = (0, import_node_fs.readFileSync)(outFile, "utf8").trim();
+      const text = (0, import_node_fs2.readFileSync)(outFile, "utf8").trim();
       if (text.length > 0) {
         const candidate = Buffer.from(text, "base64");
         if (candidate.length === 32) key = candidate;
@@ -197,9 +302,9 @@ async function oscryptKeyFor(appDir) {
       lastFailure = error?.status !== void 0 ? `PowerShell exited ${error.status}${error.signal ? ` (${error.signal})` : ""}` : error?.message ?? String(error);
     } finally {
       if (dir !== void 0) {
-        zeroOutFile((0, import_node_path.join)(dir, "key.b64"));
+        zeroOutFile((0, import_node_path2.join)(dir, "key.b64"));
         try {
-          (0, import_node_fs.rmSync)(dir, { recursive: true, force: true });
+          (0, import_node_fs2.rmSync)(dir, { recursive: true, force: true });
         } catch (error) {
           reportCleanupFailure(
             `could not remove the credential temp dir ${dir}: ${error?.message ?? error}`
@@ -221,7 +326,7 @@ async function oscryptKeyFor(appDir) {
   return key;
 }
 function systemPowershell() {
-  return (0, import_node_path.join)(
+  return (0, import_node_path2.join)(
     process.env.SystemRoot ?? "C:\\Windows",
     "System32",
     "WindowsPowerShell",
@@ -259,7 +364,7 @@ function unwrapEnv(appDir, outFile) {
 function zeroOutFile(file, attempts = 4) {
   let stat2;
   try {
-    stat2 = (0, import_node_fs.lstatSync)(file);
+    stat2 = (0, import_node_fs2.lstatSync)(file);
   } catch {
     return true;
   }
@@ -276,9 +381,9 @@ function zeroOutFile(file, attempts = 4) {
     if (attempt > 0) sleepSync(ZERO_RETRY_BACKOFF_MS * attempt);
     let fd;
     try {
-      fd = (0, import_node_fs.openSync)(file, "r+");
+      fd = (0, import_node_fs2.openSync)(file, "r+");
     } catch (error) {
-      if (!(0, import_node_fs.existsSync)(file)) return true;
+      if (!(0, import_node_fs2.existsSync)(file)) return true;
       lastError = error;
       continue;
     }
@@ -287,7 +392,7 @@ function zeroOutFile(file, attempts = 4) {
       let offset = 0;
       while (offset < size) {
         const length = Math.min(block.length, size - offset);
-        (0, import_node_fs.writeSync)(fd, block, 0, length, offset);
+        (0, import_node_fs2.writeSync)(fd, block, 0, length, offset);
         offset += length;
       }
       return true;
@@ -295,16 +400,16 @@ function zeroOutFile(file, attempts = 4) {
       lastError = error;
     } finally {
       try {
-        (0, import_node_fs.closeSync)(fd);
+        (0, import_node_fs2.closeSync)(fd);
       } catch {
       }
     }
   }
   try {
-    (0, import_node_fs.truncateSync)(file, 0);
+    (0, import_node_fs2.truncateSync)(file, 0);
   } catch {
   }
-  if ((0, import_node_fs.existsSync)(file) && currentSize(file) > 0) {
+  if ((0, import_node_fs2.existsSync)(file) && currentSize(file) > 0) {
     reportCleanupFailure(
       `could not zero ${file} after ${attempts} attempts (${lastError?.message ?? "unknown"})`
     );
@@ -314,7 +419,7 @@ function zeroOutFile(file, attempts = 4) {
 }
 function currentSize(file) {
   try {
-    return (0, import_node_fs.lstatSync)(file).size;
+    return (0, import_node_fs2.lstatSync)(file).size;
   } catch {
     return 0;
   }
@@ -327,7 +432,7 @@ function decryptOscrypt(blob, key) {
   const tag = body.subarray(body.length - 16);
   const ciphertext = body.subarray(12, body.length - 16);
   try {
-    const decipher = (0, import_node_crypto.createDecipheriv)("aes-256-gcm", key, nonce);
+    const decipher = (0, import_node_crypto2.createDecipheriv)("aes-256-gcm", key, nonce);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {
@@ -366,23 +471,23 @@ function readJsonSecret(dbPath, key, oscryptKey) {
 }
 function stateDbCandidates(appDir) {
   return [
-    (0, import_node_path.join)(appDir, "User", "globalStorage", "state.vscdb"),
-    (0, import_node_path.join)(appDir, "User", "globalStorage", "state.vscdb.backup")
+    (0, import_node_path2.join)(appDir, "User", "globalStorage", "state.vscdb"),
+    (0, import_node_path2.join)(appDir, "User", "globalStorage", "state.vscdb.backup")
   ];
 }
 function machineIdFor(appDir, fallback) {
   for (const name of ["auth.machine-id", "machineid", "machineId"]) {
-    const p = (0, import_node_path.join)(appDir, name);
-    if (!(0, import_node_fs.existsSync)(p)) continue;
-    const value = (0, import_node_fs.readFileSync)(p, "utf8").trim();
+    const p = (0, import_node_path2.join)(appDir, name);
+    if (!(0, import_node_fs2.existsSync)(p)) continue;
+    const value = (0, import_node_fs2.readFileSync)(p, "utf8").trim();
     if (value.length > 0) return value;
   }
   return fallback;
 }
 function loadNewCredential(region, appDir, oscryptKey) {
-  const file = (0, import_node_path.join)(appDir, "auth.v1.dat");
-  if (!(0, import_node_fs.existsSync)(file)) return void 0;
-  const plain = decryptOscrypt((0, import_node_fs.readFileSync)(file), oscryptKey);
+  const file = (0, import_node_path2.join)(appDir, "auth.v1.dat");
+  if (!(0, import_node_fs2.existsSync)(file)) return void 0;
+  const plain = decryptOscrypt((0, import_node_fs2.readFileSync)(file), oscryptKey);
   if (plain === void 0) return void 0;
   let session;
   try {
@@ -399,7 +504,7 @@ function loadNewCredential(region, appDir, oscryptKey) {
   const refreshExpiresAt = Date.parse(session.refreshTokenExpiresAt);
   return {
     region: region.id,
-    appName: (0, import_node_path.basename)(appDir),
+    appName: (0, import_node_path2.basename)(appDir),
     userID,
     name: typeof user.name === "string" ? user.name : "",
     email: typeof user.email === "string" ? user.email : "",
@@ -420,20 +525,20 @@ function loadNewCredential(region, appDir, oscryptKey) {
 }
 async function loadCredential(region, appDataRoot) {
   for (const appName of region.newAppNames ?? []) {
-    const appDir = (0, import_node_path.join)(appDataRoot, appName);
-    if (!(0, import_node_fs.existsSync)(appDir)) continue;
+    const appDir = (0, import_node_path2.join)(appDataRoot, appName);
+    if (!(0, import_node_fs2.existsSync)(appDir)) continue;
     const oscryptKey = await oscryptKeyFor(appDir);
     if (oscryptKey === void 0) continue;
     const credential = safeRead(() => loadNewCredential(region, appDir, oscryptKey));
     if (credential !== void 0) return credential;
   }
   for (const appName of region.appNames) {
-    const appDir = (0, import_node_path.join)(appDataRoot, appName);
-    if (!(0, import_node_fs.existsSync)(appDir)) continue;
+    const appDir = (0, import_node_path2.join)(appDataRoot, appName);
+    if (!(0, import_node_fs2.existsSync)(appDir)) continue;
     const oscryptKey = await oscryptKeyFor(appDir);
     if (oscryptKey === void 0) continue;
     for (const dbPath of stateDbCandidates(appDir)) {
-      if (!(0, import_node_fs.existsSync)(dbPath)) continue;
+      if (!(0, import_node_fs2.existsSync)(dbPath)) continue;
       let userInfo;
       try {
         userInfo = readJsonSecret(dbPath, USER_INFO_KEY, oscryptKey);
@@ -506,7 +611,7 @@ function isCredentialUsable(cached, now = Date.now()) {
 function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
   let names;
   try {
-    names = (0, import_node_fs.readdirSync)((0, import_node_os.tmpdir)());
+    names = (0, import_node_fs2.readdirSync)((0, import_node_os.tmpdir)());
   } catch {
     return 0;
   }
@@ -514,10 +619,10 @@ function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
   let reclaimed = 0;
   for (const name of names) {
     if (!name.startsWith("qoder-oscrypt-")) continue;
-    const dir = (0, import_node_path.join)((0, import_node_os.tmpdir)(), name);
+    const dir = (0, import_node_path2.join)((0, import_node_os.tmpdir)(), name);
     let link;
     try {
-      link = (0, import_node_fs.lstatSync)(dir);
+      link = (0, import_node_fs2.lstatSync)(dir);
     } catch {
       continue;
     }
@@ -530,7 +635,7 @@ function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
     if (!link.isDirectory() || link.mtimeMs > cutoff) continue;
     let entries;
     try {
-      entries = (0, import_node_fs.readdirSync)(dir);
+      entries = (0, import_node_fs2.readdirSync)(dir);
     } catch {
       continue;
     }
@@ -541,10 +646,10 @@ function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
       );
       continue;
     }
-    const keyFile = (0, import_node_path.join)(dir, "key.b64");
+    const keyFile = (0, import_node_path2.join)(dir, "key.b64");
     let unlockedBytes;
     try {
-      unlockedBytes = Buffer.from((0, import_node_fs.readFileSync)(keyFile, "utf8").trim(), "base64").length;
+      unlockedBytes = Buffer.from((0, import_node_fs2.readFileSync)(keyFile, "utf8").trim(), "base64").length;
     } catch {
       unlockedBytes = 32;
     }
@@ -556,8 +661,8 @@ function sweepStaleOscryptDirs(maxAgeMs = 5 * 60 * 1e3) {
     }
     try {
       zeroOutFile(keyFile);
-      zeroOutFile((0, import_node_path.join)(dir, OSCRYPT_MARKER));
-      (0, import_node_fs.rmSync)(dir, { recursive: true, force: true });
+      zeroOutFile((0, import_node_path2.join)(dir, OSCRYPT_MARKER));
+      (0, import_node_fs2.rmSync)(dir, { recursive: true, force: true });
       reclaimed += 1;
     } catch (error) {
       reportCleanupFailure(
@@ -639,13 +744,13 @@ var CredentialCache = class {
 
 // src/qoder/lib/shim.js
 var import_node_http = require("node:http");
-var import_node_crypto3 = require("node:crypto");
+var import_node_crypto4 = require("node:crypto");
 
 // src/qoder/lib/upstream.js
-var import_node_crypto2 = __toESM(require("node:crypto"), 1);
+var import_node_crypto3 = __toESM(require("node:crypto"), 1);
 var import_node_child_process2 = require("node:child_process");
-var import_node_fs2 = require("node:fs");
-var import_node_path2 = require("node:path");
+var import_node_fs3 = require("node:fs");
+var import_node_path3 = require("node:path");
 
 // src/qoder/lib/errors.js
 var QUEUE_MARKERS = ['"queueType"', '"retryAfterSeconds"', '"isQueued"', '"serviceAvailable"'];
@@ -882,7 +987,7 @@ function encodeBody(plaintext) {
 }
 function aesEncryptCBCBase64(plaintext, keyString) {
   const key = Buffer.from(keyString);
-  const cipher = import_node_crypto2.default.createCipheriv("aes-128-cbc", key, key);
+  const cipher = import_node_crypto3.default.createCipheriv("aes-128-cbc", key, key);
   return cipher.update(plaintext, "utf8", "base64") + cipher.final("base64");
 }
 function signaturePath(url) {
@@ -891,7 +996,7 @@ function signaturePath(url) {
   return path;
 }
 function authHeaders(body, url, credential) {
-  const aesKey = import_node_crypto2.default.randomUUID().replace(/-/g, "").slice(0, 16);
+  const aesKey = import_node_crypto3.default.randomUUID().replace(/-/g, "").slice(0, 16);
   const infoB64 = aesEncryptCBCBase64(
     JSON.stringify({
       uid: credential.userID,
@@ -902,15 +1007,15 @@ function authHeaders(body, url, credential) {
     }),
     aesKey
   );
-  const cosyKey = import_node_crypto2.default.publicEncrypt(
-    { key: QODER_RSA_PUBLIC_KEY, padding: import_node_crypto2.default.constants.RSA_PKCS1_PADDING },
+  const cosyKey = import_node_crypto3.default.publicEncrypt(
+    { key: QODER_RSA_PUBLIC_KEY, padding: import_node_crypto3.default.constants.RSA_PKCS1_PADDING },
     Buffer.from(aesKey)
   ).toString("base64");
   const timestamp = Math.floor(Date.now() / 1e3).toString();
   const payloadB64 = Buffer.from(
     JSON.stringify({
       version: "v1",
-      requestId: import_node_crypto2.default.randomUUID(),
+      requestId: import_node_crypto3.default.randomUUID(),
       info: infoB64,
       cosyVersion: COSY_VERSION,
       ideVersion: ""
@@ -918,7 +1023,7 @@ function authHeaders(body, url, credential) {
   ).toString("base64");
   const path = signaturePath(url);
   const bodyBytes = body ?? Buffer.alloc(0);
-  const sig = import_node_crypto2.default.createHash("md5").update(payloadB64).update("\n").update(cosyKey).update("\n").update(timestamp).update("\n").update(bodyBytes).update("\n").update(path).digest("hex");
+  const sig = import_node_crypto3.default.createHash("md5").update(payloadB64).update("\n").update(cosyKey).update("\n").update(timestamp).update("\n").update(bodyBytes).update("\n").update(path).digest("hex");
   const machineID = credential.machineID;
   return {
     Authorization: `Bearer COSY.${payloadB64}.${sig}`,
@@ -932,14 +1037,14 @@ function authHeaders(body, url, credential) {
     "Cosy-Machineos": MACHINE_OS,
     "Cosy-Clienttype": CLIENT_TYPE,
     "Cosy-Clientip": "127.0.0.1",
-    "Cosy-Bodyhash": import_node_crypto2.default.createHash("md5").update(bodyBytes).digest("hex"),
+    "Cosy-Bodyhash": import_node_crypto3.default.createHash("md5").update(bodyBytes).digest("hex"),
     "Cosy-Bodylength": String(bodyBytes.length),
     "Cosy-Sigpath": path,
     "Cosy-Data-Policy": DATA_POLICY,
     "Cosy-Organization-Id": "",
     "Cosy-Organization-Tags": "",
     "Login-Version": LOGIN_VERSION,
-    "X-Request-Id": import_node_crypto2.default.randomUUID()
+    "X-Request-Id": import_node_crypto3.default.randomUUID()
   };
 }
 function modelListUrl(region) {
@@ -1002,8 +1107,8 @@ function readUmidInfo(region) {
   if (process.platform !== "win32") return null;
   const roots = umidRootsFor(region);
   for (const root of roots) {
-    const binary = (0, import_node_path2.join)(root, "resources", "umid", "runtime-info.exe");
-    if (!(0, import_node_fs2.existsSync)(binary)) continue;
+    const binary = (0, import_node_path3.join)(root, "resources", "umid", "runtime-info.exe");
+    if (!(0, import_node_fs3.existsSync)(binary)) continue;
     let output;
     try {
       output = (0, import_node_child_process2.execFileSync)(binary, [], { timeout: 5e3, stdio: ["ignore", "pipe", "ignore"] }).toString();
@@ -1024,12 +1129,12 @@ function readUmidInfo(region) {
 function umidRootsFor(region) {
   const localAppData = process.env.LOCALAPPDATA;
   if (localAppData === void 0) return [];
-  const programs = (0, import_node_path2.join)(localAppData, "Programs");
+  const programs = (0, import_node_path3.join)(localAppData, "Programs");
   const roots = [
-    (0, import_node_path2.join)(programs, "Qoder", ".qoder-versions", "0.4.3"),
-    (0, import_node_path2.join)(programs, "Qoder")
+    (0, import_node_path3.join)(programs, "Qoder", ".qoder-versions", "0.4.3"),
+    (0, import_node_path3.join)(programs, "Qoder")
   ];
-  if (region?.id === "qoder-cn") roots.push((0, import_node_path2.join)(programs, "QoderCN"));
+  if (region?.id === "qoder-cn") roots.push((0, import_node_path3.join)(programs, "QoderCN"));
   return roots;
 }
 async function readJson(response, context) {
@@ -1297,7 +1402,7 @@ async function exchangePat(region, pat, signal) {
 }
 async function* streamChat(region, credential, request, signal) {
   const model = request.model;
-  const recordID = import_node_crypto2.default.randomUUID();
+  const recordID = import_node_crypto3.default.randomUUID();
   const lastUser = [...request.messages].reverse().find((m) => m.role === "user");
   const lastText = typeof lastUser?.content === "string" ? lastUser.content : "";
   const parameters = {};
@@ -1313,10 +1418,10 @@ async function* streamChat(region, credential, request, signal) {
     parameters.enable_thinking = false;
   }
   const body = {
-    request_id: import_node_crypto2.default.randomUUID(),
+    request_id: import_node_crypto3.default.randomUUID(),
     request_set_id: recordID,
     chat_record_id: recordID,
-    session_id: request.sessionId ?? `dsh-${import_node_crypto2.default.randomUUID()}`,
+    session_id: request.sessionId ?? `dsh-${import_node_crypto3.default.randomUUID()}`,
     stream: true,
     chat_task: "FREE_INPUT",
     is_reply: true,
@@ -1353,7 +1458,7 @@ async function* streamChat(region, credential, request, signal) {
       version: "1.0.0",
       type: "agent",
       stage: "start",
-      id: import_node_crypto2.default.randomUUID(),
+      id: import_node_crypto3.default.randomUUID(),
       name: lastText.slice(0, 30),
       begin_at: Date.now()
     }
@@ -1861,6 +1966,12 @@ function createQoderShim(options) {
     invalidateCredential,
     region,
     logger,
+    // Endpoint stability. Both are optional so the Pi port keeps its original
+    // per-process behaviour; Cyrene persists them so a model profile survives a
+    // restart. `preferredPort` is only a preference — a busy port falls back to
+    // a random one rather than failing activation.
+    secret: injectedSecret,
+    preferredPort,
     // The upstream call, injectable so a test can force a queue rejection (or
     // any other failure) without reaching the real gateway. Everything else the
     // shim does is observable over HTTP, but no test can ask Qoder to be busy
@@ -1868,7 +1979,7 @@ function createQoderShim(options) {
     // of regression that would ship unnoticed.
     runChat = streamChat
   } = options;
-  const SHARED_SECRET = (0, import_node_crypto3.randomBytes)(32).toString("base64url");
+  const SHARED_SECRET = typeof injectedSecret === "string" && injectedSecret.length > 0 ? injectedSecret : (0, import_node_crypto4.randomBytes)(32).toString("base64url");
   function bearerOk(req) {
     const header = req.headers.authorization;
     if (typeof header !== "string") return false;
@@ -1877,7 +1988,7 @@ function createQoderShim(options) {
     const presented = Buffer.from(match[1]);
     const expected = Buffer.from(SHARED_SECRET);
     if (presented.length !== expected.length) return false;
-    return (0, import_node_crypto3.timingSafeEqual)(presented, expected);
+    return (0, import_node_crypto4.timingSafeEqual)(presented, expected);
   }
   const server = (0, import_node_http.createServer)((req, res) => {
     handle(req, res).catch((error) => {
@@ -1885,11 +1996,33 @@ function createQoderShim(options) {
       else res.end();
     });
   });
-  const ready = new Promise((resolve, reject) => {
-    server.once("listening", () => resolve());
-    server.once("error", reject);
+  const attemptBind = (port) => new Promise((resolve, reject) => {
+    const onListening = () => {
+      server.removeListener("error", onError);
+      resolve();
+    };
+    const onError = (error) => {
+      server.removeListener("listening", onListening);
+      reject(error);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1");
   });
-  server.listen(0, "127.0.0.1");
+  const ready = (async () => {
+    const preferred = typeof preferredPort === "number" && Number.isInteger(preferredPort) && preferredPort > 0 ? preferredPort : 0;
+    if (preferred === 0) {
+      await attemptBind(0);
+      return;
+    }
+    try {
+      await attemptBind(preferred);
+    } catch (error) {
+      if (error?.code !== "EADDRINUSE") throw error;
+      logger?.warn?.(`dsh-connect-qoder: \u7AEF\u53E3 ${preferred} \u5DF2\u88AB\u5360\u7528\uFF0C\u6539\u7528\u968F\u673A\u7AEF\u53E3\uFF08\u6A21\u578B\u6863\u6848\u91CC\u7684 Base URL \u9700\u8981\u66F4\u65B0\uFF09`);
+      await attemptBind(0);
+    }
+  })();
   server.unref();
   const baseUrl = () => {
     const address = server.address();
@@ -2003,7 +2136,7 @@ function createQoderShim(options) {
       const message = { role: "assistant", content: content.join("") };
       if (toolCalls.size > 0) message.tool_calls = [...toolCalls.values()];
       sendJson(res, 200, {
-        id: `chatcmpl-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+        id: `chatcmpl-${(0, import_node_crypto4.randomBytes)(8).toString("hex")}`,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1e3),
         model: displayModel,
@@ -2020,7 +2153,7 @@ function createQoderShim(options) {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no"
     });
-    const id = `chatcmpl-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`;
+    const id = `chatcmpl-${(0, import_node_crypto4.randomBytes)(8).toString("hex")}`;
     const created = Math.floor(Date.now() / 1e3);
     let sentRole = false;
     try {
@@ -2136,8 +2269,8 @@ function writeSse(res, value) {
 }
 
 // src/qoder/lib/catalog-store.js
-var import_node_fs3 = require("node:fs");
-var import_node_path3 = require("node:path");
+var import_node_fs4 = require("node:fs");
+var import_node_path4 = require("node:path");
 var CATALOG_TTL_MS = 30 * 60 * 1e3;
 var CATALOG_FORMAT_VERSION = 1;
 var CatalogStore = class {
@@ -2158,12 +2291,12 @@ var CatalogStore = class {
   load() {
     const tmp = `${this.path}.tmp`;
     try {
-      if ((0, import_node_fs3.existsSync)(tmp)) (0, import_node_fs3.unlinkSync)(tmp);
+      if ((0, import_node_fs4.existsSync)(tmp)) (0, import_node_fs4.unlinkSync)(tmp);
     } catch {
     }
-    if (!(0, import_node_fs3.existsSync)(this.path)) return;
+    if (!(0, import_node_fs4.existsSync)(this.path)) return;
     try {
-      const parsed = JSON.parse((0, import_node_fs3.readFileSync)(this.path, "utf8"));
+      const parsed = JSON.parse((0, import_node_fs4.readFileSync)(this.path, "utf8"));
       if (parsed?.version !== CATALOG_FORMAT_VERSION) return;
       if (!Array.isArray(parsed.entries)) return;
       this.entries = parsed.entries;
@@ -2175,13 +2308,13 @@ var CatalogStore = class {
     this.lastSaveError = void 0;
     const tmp = `${this.path}.tmp`;
     try {
-      (0, import_node_fs3.mkdirSync)((0, import_node_path3.dirname)(this.path), { recursive: true });
-      (0, import_node_fs3.writeFileSync)(tmp, JSON.stringify({ version: CATALOG_FORMAT_VERSION, fetchedAt: this.fetchedAt, entries: this.entries }, null, 2), "utf8");
-      (0, import_node_fs3.renameSync)(tmp, this.path);
+      (0, import_node_fs4.mkdirSync)((0, import_node_path4.dirname)(this.path), { recursive: true });
+      (0, import_node_fs4.writeFileSync)(tmp, JSON.stringify({ version: CATALOG_FORMAT_VERSION, fetchedAt: this.fetchedAt, entries: this.entries }, null, 2), "utf8");
+      (0, import_node_fs4.renameSync)(tmp, this.path);
     } catch (error) {
       this.lastSaveError = error;
       try {
-        if ((0, import_node_fs3.existsSync)(tmp)) (0, import_node_fs3.unlinkSync)(tmp);
+        if ((0, import_node_fs4.existsSync)(tmp)) (0, import_node_fs4.unlinkSync)(tmp);
       } catch {
       }
       this.logger?.warn?.(`dsh-connect-qoder: could not save catalog ${this.path}`, error);
@@ -2202,17 +2335,19 @@ var CatalogStore = class {
 
 // src/qoder/runtime.js
 var RegionRuntime = class {
-  constructor(region, logger, cacheRoot) {
+  constructor(region, logger, cacheRoot, endpoints, portIndex = 0) {
     this.region = region;
     this.logger = logger;
     this.cacheRoot = cacheRoot;
+    this.endpoints = endpoints;
+    this.portIndex = portIndex;
     this.credentials = new CredentialCache({
       loadApp: () => loadCredential(region, process.env.APPDATA ?? ""),
       loadEnv: () => loadEnvCredential(region),
       exchangePat: async (credential) => exchangePat(region, credential.token)
     });
     this.catalog = new CatalogStore({
-      path: (0, import_node_path4.join)(cacheRoot, `.qoder-catalog.${region.id}.json`),
+      path: (0, import_node_path5.join)(cacheRoot, `.qoder-catalog.${region.id}.json`),
       logger
     });
     this.shim = void 0;
@@ -2229,7 +2364,11 @@ var RegionRuntime = class {
       resolveAlwaysThinking: (id) => this.entryFor(id)?.alwaysThinking === true,
       resolveEnabledIds: () => [],
       invalidateCredential: () => this.credentials.invalidate(),
-      logger: this.logger
+      logger: this.logger,
+      ...this.endpoints === void 0 ? {} : {
+        secret: this.endpoints.tokenFor(this.region.id),
+        preferredPort: this.endpoints.preferredPortFor(this.region.id, this.portIndex)
+      }
     });
     return this.shim;
   }
@@ -2237,6 +2376,10 @@ var RegionRuntime = class {
   async ensureShim() {
     const shim = this.startShim();
     await shim.ready;
+    if (this.endpoints !== void 0) {
+      const port = Number(new URL(shim.baseUrl()).port);
+      if (Number.isInteger(port) && port > 0) this.endpoints.recordPort(this.region.id, port);
+    }
     return shim;
   }
   /**
@@ -2286,19 +2429,19 @@ var RegionRuntime = class {
     if (this.shim !== void 0) await this.shim.close();
   }
 };
-async function createQoderRuntimes({ cacheRoot, logger }) {
+async function createQoderRuntimes({ cacheRoot, logger, endpoints }) {
   setCredentialDiagnosticSink((message) => logger.warn(message));
   try {
     sweepStaleOscryptDirs();
   } catch {
   }
-  return REGIONS.map((region) => new RegionRuntime(region, logger, cacheRoot));
+  return REGIONS.map((region, index) => new RegionRuntime(region, logger, cacheRoot, endpoints, index));
 }
 
 // src/trae/lib/trae-core.js
 var import_promises = require("node:fs/promises");
-var import_node_crypto4 = require("node:crypto");
-var import_node_path5 = require("node:path");
+var import_node_crypto5 = require("node:crypto");
+var import_node_path6 = require("node:path");
 var import_node_os2 = require("node:os");
 var import_node_http2 = require("node:http");
 var import_node_stream = require("node:stream");
@@ -2730,14 +2873,14 @@ function decryptTraeStorageValue(encoded) {
   const random = buffer.subarray(6, 38);
   const encrypted = buffer.subarray(38);
   const salt = type === "aes-private" ? xor(SALT_C, SALT_D) : xor(SALT_A, SALT_B);
-  const first = (0, import_node_crypto4.createHash)("sha512").update(random).digest();
-  const derived = (0, import_node_crypto4.createHash)("sha512").update(Buffer.concat([first, salt])).digest();
-  const decipher = (0, import_node_crypto4.createDecipheriv)("aes-128-cbc", derived.subarray(0, 16), derived.subarray(16, 32));
+  const first = (0, import_node_crypto5.createHash)("sha512").update(random).digest();
+  const derived = (0, import_node_crypto5.createHash)("sha512").update(Buffer.concat([first, salt])).digest();
+  const decipher = (0, import_node_crypto5.createDecipheriv)("aes-128-cbc", derived.subarray(0, 16), derived.subarray(16, 32));
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   if (decrypted.length < 64) throw new Error("Trae auth plaintext is too short");
   const expected = decrypted.subarray(0, 64);
   const plaintext = decrypted.subarray(64);
-  const actual = (0, import_node_crypto4.createHash)("sha512").update(plaintext).digest();
+  const actual = (0, import_node_crypto5.createHash)("sha512").update(plaintext).digest();
   if (!expected.equals(actual)) throw new Error("Trae auth integrity check failed");
   return plaintext.toString("utf8");
 }
@@ -2829,13 +2972,13 @@ function traeStorageCandidates(platform = process.platform, home = (0, import_no
     let roots;
     let appNames;
     if (platform === "darwin") {
-      roots = [(0, import_node_path5.join)(home, "Library", "Application Support")];
+      roots = [(0, import_node_path6.join)(home, "Library", "Application Support")];
       appNames = [app];
     } else if (platform === "win32") {
-      roots = [env.APPDATA, (0, import_node_path5.join)(home, "AppData", "Roaming")].filter((value, index, all) => typeof value === "string" && value !== "" && all.indexOf(value) === index);
+      roots = [env.APPDATA, (0, import_node_path6.join)(home, "AppData", "Roaming")].filter((value, index, all) => typeof value === "string" && value !== "" && all.indexOf(value) === index);
       appNames = WINDOWS_APP_NAMES[edition];
     } else if (platform === "linux") {
-      roots = [env.XDG_CONFIG_HOME || (0, import_node_path5.join)(home, ".config")];
+      roots = [env.XDG_CONFIG_HOME || (0, import_node_path6.join)(home, ".config")];
       appNames = LINUX_APP_NAMES[edition];
     } else {
       roots = [];
@@ -2843,7 +2986,7 @@ function traeStorageCandidates(platform = process.platform, home = (0, import_no
     }
     for (const root of roots) for (const appName of appNames) result.push({
       edition,
-      path: (0, import_node_path5.join)(root, appName, "User", "globalStorage", "storage.json"),
+      path: (0, import_node_path6.join)(root, appName, "User", "globalStorage", "storage.json"),
       source: "desktop"
     });
   }
@@ -2859,7 +3002,7 @@ function traeCliCandidates(platform = process.platform, home = (0, import_node_o
     const edition = name === ".trae-cn" ? "cn" : "sg";
     result.push({
       edition,
-      path: (0, import_node_path5.join)(root, name, TRAE_CLI_TOKEN_FILENAME),
+      path: (0, import_node_path6.join)(root, name, TRAE_CLI_TOKEN_FILENAME),
       source: "cli"
     });
   }
@@ -2912,13 +3055,13 @@ function setTraeOwnDir(dir) {
   ownDirOverride = typeof dir === "string" && dir !== "" ? dir : void 0;
 }
 function traeOwnDir() {
-  return ownDirOverride ?? (0, import_node_path5.join)((0, import_node_os2.homedir)(), ".pi", "agent", "cache", "dsh-connect-trae");
+  return ownDirOverride ?? (0, import_node_path6.join)((0, import_node_os2.homedir)(), ".pi", "agent", "cache", "dsh-connect-trae");
 }
 function traeOwnAuthPath(region) {
-  return (0, import_node_path5.join)(traeOwnDir(), `${TRAE_OWN_PREFIX}.${region}.json`);
+  return (0, import_node_path6.join)(traeOwnDir(), `${TRAE_OWN_PREFIX}.${region}.json`);
 }
 function legacyTraeOwnAuthPath() {
-  return (0, import_node_path5.join)(traeOwnDir(), TRAE_AUTH_FILENAME);
+  return (0, import_node_path6.join)(traeOwnDir(), TRAE_AUTH_FILENAME);
 }
 function optionalString(value) {
   return typeof value === "string" && value !== "" ? value : void 0;
@@ -2960,7 +3103,7 @@ function normalizeTraeCredential(raw, edition, source) {
 }
 function traeAccountId(credential) {
   const stable = `${credential.edition}\0${credential.userId || credential.accountName || "unknown"}`;
-  return (0, import_node_crypto4.createHash)("sha256").update(stable).digest("hex").slice(0, 24);
+  return (0, import_node_crypto5.createHash)("sha256").update(stable).digest("hex").slice(0, 24);
 }
 function parseOwn(text) {
   try {
@@ -3257,7 +3400,7 @@ var TraeCredentialStore = class {
         source: "dsh"
       };
       const ownPath = this.ownAuthPath();
-      await (0, import_promises.mkdir)((0, import_node_path5.dirname)(ownPath), { recursive: true });
+      await (0, import_promises.mkdir)((0, import_node_path6.dirname)(ownPath), { recursive: true });
       await (0, import_promises.writeFile)(ownPath, `${JSON.stringify({
         version: OWN_VERSION,
         credential: refreshed
@@ -3347,14 +3490,14 @@ async function readTraeIdentity(candidate, options = {}) {
   const home = options.home ?? (0, import_node_os2.homedir)();
   const env = options.env ?? process.env;
   const storage = JSON.parse(await (0, import_promises.readFile)(candidate.path, "utf8"));
-  const appRoot = (0, import_node_path5.dirname)((0, import_node_path5.dirname)((0, import_node_path5.dirname)(candidate.path)));
-  const machineFile = nonEmpty(await (0, import_promises.readFile)((0, import_node_path5.join)(appRoot, "machineid"), "utf8").catch(() => ""));
+  const appRoot = (0, import_node_path6.dirname)((0, import_node_path6.dirname)((0, import_node_path6.dirname)(candidate.path)));
+  const machineFile = nonEmpty(await (0, import_promises.readFile)((0, import_node_path6.join)(appRoot, "machineid"), "utf8").catch(() => ""));
   const telemetryMachine = nonEmpty(storage["telemetry.machineId"]);
   const devDevice = nonEmpty(storage["telemetry.devDeviceId"]);
   const dcDevice = deviceCenterId(storage);
   const machineId = telemetryMachine ?? machineFile;
   if (machineId === void 0) throw new Error(`Trae ${candidate.edition} has no stable machine identity`);
-  const deviceId = dcDevice ?? devDevice ?? (0, import_node_crypto4.createHash)("sha256").update(machineId).digest("hex").slice(0, 32);
+  const deviceId = dcDevice ?? devDevice ?? (0, import_node_crypto5.createHash)("sha256").update(machineId).digest("hex").slice(0, 32);
   const buildVersion = nonEmpty(storage["iCubeLastVersion"]);
   const appName = {
     cn: "Trae CN",
@@ -3364,10 +3507,10 @@ async function readTraeIdentity(candidate, options = {}) {
   }[candidate.edition];
   const productPaths = [];
   if (appName !== void 0 && (platform === "darwin" || platform === "win32")) {
-    if (platform === "darwin") productPaths.push((0, import_node_path5.join)("/Applications", `${appName}.app`, "Contents", "Resources", "app", "product.json"));
+    if (platform === "darwin") productPaths.push((0, import_node_path6.join)("/Applications", `${appName}.app`, "Contents", "Resources", "app", "product.json"));
     else {
-      const localRoots = [env.LOCALAPPDATA, (0, import_node_path5.join)(home, "AppData", "Local")].filter((value) => typeof value === "string" && value !== "").filter((value, index, all) => all.indexOf(value) === index);
-      for (const root of localRoots) for (const spelling of traeWindowsAppNames(candidate.edition)) productPaths.push((0, import_node_path5.join)(root, "Programs", spelling, "resources", "app", "product.json"));
+      const localRoots = [env.LOCALAPPDATA, (0, import_node_path6.join)(home, "AppData", "Local")].filter((value) => typeof value === "string" && value !== "").filter((value, index, all) => all.indexOf(value) === index);
+      for (const root of localRoots) for (const spelling of traeWindowsAppNames(candidate.edition)) productPaths.push((0, import_node_path6.join)(root, "Programs", spelling, "resources", "app", "product.json"));
     }
   }
   let product = {};
@@ -3419,14 +3562,14 @@ async function readTraeCliIdentity(edition, options = {}) {
   const platform = options.platform ?? process.platform;
   const home = options.home ?? (0, import_node_os2.homedir)();
   const env = options.env ?? process.env;
-  const cliHome = (0, import_node_path5.join)(home, CLI_HOME_BY_EDITION[edition]);
-  const argv = await readJsonFile((0, import_node_path5.join)(cliHome, "argv.json"));
-  const version = await readJsonFile((0, import_node_path5.join)(cliHome, "builtin", "ide_version.json"));
+  const cliHome = (0, import_node_path6.join)(home, CLI_HOME_BY_EDITION[edition]);
+  const argv = await readJsonFile((0, import_node_path6.join)(cliHome, "argv.json"));
+  const version = await readJsonFile((0, import_node_path6.join)(cliHome, "builtin", "ide_version.json"));
   const crashReporterId = nonEmpty(argv?.["crash-reporter-id"]);
   const host = nonEmpty(env["HOSTNAME"]) ?? await readHostname() ?? "unknown-host";
   const user = nonEmpty(env["USER"]) ?? nonEmpty(env["USERNAME"]) ?? "unknown-user";
-  const deviceId = crashReporterId ?? (0, import_node_crypto4.createHash)("sha256").update(`trae-cli\0${host}\0${user}`).digest("hex").slice(0, 32);
-  const machineId = (0, import_node_crypto4.createHash)("sha256").update(`trae-cli-machine\0${deviceId}\0${host}`).digest("hex");
+  const deviceId = crashReporterId ?? (0, import_node_crypto5.createHash)("sha256").update(`trae-cli\0${host}\0${user}`).digest("hex").slice(0, 32);
+  const machineId = (0, import_node_crypto5.createHash)("sha256").update(`trae-cli-machine\0${deviceId}\0${host}`).digest("hex");
   const appVersion = nonEmpty(version?.["version"]);
   const deviceCpu = (0, import_node_os2.cpus)()[0]?.model.split(" ")[0];
   const osVersion = `${platform === "darwin" ? "macOS" : platform === "win32" ? "Windows" : platform} ${(0, import_node_os2.release)()}`;
@@ -3551,7 +3694,9 @@ function readBody2(req) {
   });
 }
 function createTraeShim(options) {
-  const secret = (0, import_node_crypto4.randomBytes)(32).toString("base64url");
+  const injectedSecret = options?.["secret"];
+  const preferredPort = options?.["preferredPort"];
+  const secret = typeof injectedSecret === "string" && injectedSecret.length > 0 ? injectedSecret : (0, import_node_crypto5.randomBytes)(32).toString("base64url");
   const sockets = /* @__PURE__ */ new Set();
   const server = (0, import_node_http2.createServer)((req, res) => {
     handle(req, res);
@@ -3560,18 +3705,40 @@ function createTraeShim(options) {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
   });
-  const ready = new Promise((resolve, reject) => {
-    server.once("listening", resolve);
-    server.once("error", reject);
+  const attemptBind = (port) => new Promise((resolve, reject) => {
+    const onListening = () => {
+      server.removeListener("error", onError);
+      resolve();
+    };
+    const onError = (error) => {
+      server.removeListener("listening", onListening);
+      reject(error);
+    };
+    server.once("listening", onListening);
+    server.once("error", onError);
+    server.listen(port, "127.0.0.1");
   });
-  server.listen(0, "127.0.0.1");
+  const ready = (async () => {
+    const preferred = typeof preferredPort === "number" && Number.isInteger(preferredPort) && preferredPort > 0 ? preferredPort : 0;
+    if (preferred === 0) {
+      await attemptBind(0);
+      return;
+    }
+    try {
+      await attemptBind(preferred);
+    } catch (error) {
+      if (error?.["code"] !== "EADDRINUSE") throw error;
+      options?.logger?.warn?.(`dsh-connect-trae: \u7AEF\u53E3 ${preferred} \u5DF2\u88AB\u5360\u7528\uFF0C\u6539\u7528\u968F\u673A\u7AEF\u53E3\uFF08\u6A21\u578B\u6863\u6848\u91CC\u7684 Base URL \u9700\u8981\u66F4\u65B0\uFF09`);
+      await attemptBind(0);
+    }
+  })();
   server.unref();
   function bearerOk(req) {
     const match = typeof req.headers.authorization === "string" ? /^Bearer\s+(.+)$/i.exec(req.headers.authorization.trim()) : null;
     if (match === null) return false;
     const actual = Buffer.from(match[1] ?? "");
     const expected = Buffer.from(secret);
-    return actual.length === expected.length && (0, import_node_crypto4.timingSafeEqual)(actual, expected);
+    return actual.length === expected.length && (0, import_node_crypto5.timingSafeEqual)(actual, expected);
   }
   async function handle(req, res) {
     try {
@@ -3613,6 +3780,87 @@ function createTraeShim(options) {
         req.socket.once("close", abort);
         const result = await options.client.chatStream(raw, controller.signal);
         if (!result.ok) return writeError2(res, STATUS_BY_KIND[result.kind], result.kind, result.message);
+        if (parsed.stream !== true) {
+          const textDecoder = new TextDecoder();
+          const textParts = [];
+          const reasoningParts = [];
+          const toolCallMap = /* @__PURE__ */ new Map();
+          let finishReason = "stop";
+          let usage;
+          const absorbChunk = (chunk) => {
+            if (chunk !== null && typeof chunk === "object" && chunk["usage"] !== void 0 && chunk["usage"] !== null) usage = chunk["usage"];
+            const choice = Array.isArray(chunk?.["choices"]) ? chunk["choices"][0] : void 0;
+            if (choice === void 0) return;
+            const delta = choice["delta"];
+            if (delta !== null && typeof delta === "object") {
+              if (typeof delta["content"] === "string" && delta["content"] !== "") textParts.push(delta["content"]);
+              if (typeof delta["reasoning_content"] === "string" && delta["reasoning_content"] !== "") reasoningParts.push(delta["reasoning_content"]);
+              if (Array.isArray(delta["tool_calls"])) {
+                for (const call of delta["tool_calls"]) {
+                  if (call === null || typeof call !== "object") continue;
+                  const index = typeof call["index"] === "number" ? call["index"] : toolCallMap.size;
+                  const existing = toolCallMap.get(index) ?? {
+                    id: void 0,
+                    type: "function",
+                    function: { name: "", arguments: "" }
+                  };
+                  if (typeof call["id"] === "string" && call["id"] !== "") existing.id = call["id"];
+                  if (typeof call["type"] === "string" && call["type"] !== "") existing.type = call["type"];
+                  const fn = call["function"];
+                  if (fn !== null && typeof fn === "object") {
+                    if (typeof fn["name"] === "string" && fn["name"] !== "" && existing["function"].name === "") existing["function"].name = fn["name"];
+                    if (typeof fn["arguments"] === "string" && fn["arguments"] !== "") existing["function"].arguments += fn["arguments"];
+                  }
+                  toolCallMap.set(index, existing);
+                }
+              }
+            }
+            if (typeof choice["finish_reason"] === "string" && choice["finish_reason"] !== "") finishReason = choice["finish_reason"];
+          };
+          let upstreamError;
+          try {
+            let buffer = "";
+            const absorbLine = (line) => {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith("data:")) return;
+              const payload = trimmed.slice(5).trim();
+              if (payload === "" || payload === "[DONE]") return;
+              try {
+                absorbChunk(JSON.parse(payload));
+              } catch {
+              }
+            };
+            for await (const piece of import_node_stream.Readable.fromWeb(result.response.body)) {
+              buffer += textDecoder.decode(piece, { stream: true });
+              const lines = buffer.split("\n");
+              buffer = lines.pop() ?? "";
+              for (const line of lines) absorbLine(line);
+            }
+            if (buffer !== "") absorbLine(buffer);
+          } catch (error) {
+            upstreamError = error instanceof Error ? error : new Error(String(error));
+          }
+          if (upstreamError !== void 0) return writeError2(res, 502, "upstream_error", upstreamError.message);
+          const message = { role: "assistant", content: textParts.join("") };
+          if (reasoningParts.length > 0) message["reasoning_content"] = reasoningParts.join("");
+          if (toolCallMap.size > 0) {
+            message["tool_calls"] = [...toolCallMap.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => ({
+              ...call.id === void 0 ? {} : { id: call.id },
+              type: call.type,
+              function: call["function"]
+            }));
+            if (finishReason === "stop") finishReason = "tool_calls";
+          }
+          return writeJson(res, 200, {
+            id: `chatcmpl-${(0, import_node_crypto5.randomBytes)(8).toString("hex")}`,
+            object: "chat.completion",
+            created: Math.floor(Date.now() / 1e3),
+            model: typeof parsed.model === "string" ? parsed.model : "",
+            choices: [{ index: 0, message, finish_reason: finishReason }],
+            // Absent beats fabricated: a zero would read as "this turn cost nothing".
+            ...usage === void 0 ? {} : { usage }
+          });
+        }
         res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
@@ -3660,7 +3908,7 @@ function normalizeTraeVersionCode(buildVersion) {
   return /^\d+$/.test(trimmed) ? trimmed : TRAE_VERSION_CODE_FALLBACK;
 }
 function buildTraeHeaders(credential, identity, options = {}) {
-  const requestId = options.requestId ?? (0, import_node_crypto4.randomUUID)();
+  const requestId = options.requestId ?? (0, import_node_crypto5.randomUUID)();
   const traceId = requestId.replaceAll("-", "").slice(0, 32);
   const profile = options.profile ?? "agent-task";
   const common = {
@@ -4082,7 +4330,7 @@ function normalizeToolCalls(value) {
 function bridgeTraeSoloStream(response, model) {
   const source = response.body;
   if (source === null) return new Response(null, { status: 502 });
-  const id = `chatcmpl-${(0, import_node_crypto4.randomUUID)().replaceAll("-", "").slice(0, 24)}`;
+  const id = `chatcmpl-${(0, import_node_crypto5.randomUUID)().replaceAll("-", "").slice(0, 24)}`;
   const created = Math.floor(Date.now() / 1e3);
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -4626,7 +4874,9 @@ function toCheckin(status) {
 // src/trae/runtime.js
 var REGION_KEYS = ["cn", "ai"];
 var RegionStack = class {
-  constructor(region, logger) {
+  constructor(region, logger, cacheRoot, endpoints, portIndex = 0) {
+    this.endpoints = endpoints;
+    this.portIndex = portIndex;
     this.region = region;
     this.logger = logger;
     this.catalog = new TraeCatalog(region);
@@ -4675,7 +4925,13 @@ var RegionStack = class {
     this.shim = createTraeShim({
       catalog: this.catalog,
       client: this.delegating,
-      logger: this.logger
+      logger: this.logger,
+      // Absent on the Pi port, which keeps its original random-per-process
+      // behaviour.
+      ...this.endpoints === void 0 ? {} : {
+        secret: this.endpoints.tokenFor(this.region),
+        preferredPort: this.endpoints.preferredPortFor(this.region, this.portIndex)
+      }
     });
     return this.shim;
   }
@@ -4683,6 +4939,10 @@ var RegionStack = class {
   async ensureShim() {
     const shim = this.startShim();
     await shim.ready;
+    if (this.endpoints !== void 0) {
+      const port = Number(new URL(shim.baseUrl()).port);
+      if (Number.isInteger(port) && port > 0) this.endpoints.recordPort(this.region, port);
+    }
     return shim;
   }
   /**
@@ -4765,11 +5025,11 @@ var RegionStack = class {
     return merged;
   }
 };
-async function createTraeStacks({ cacheRoot, logger }) {
+async function createTraeStacks({ cacheRoot, logger, endpoints }) {
   if (cacheRoot !== void 0) setTraeOwnDir(cacheRoot);
   const stacks = [];
-  for (const region of REGION_KEYS) {
-    const stack = new RegionStack(region, logger, cacheRoot);
+  for (const [index, region] of REGION_KEYS.entries()) {
+    const stack = new RegionStack(region, logger, cacheRoot, endpoints, index);
     stack.catalog.set(fallbackModelsFor(region));
     stacks.push(stack);
   }
@@ -5068,7 +5328,7 @@ function createWindowManager(logger) {
         if (win === created) win = null;
       });
       win = created;
-      await created.loadFile((0, import_node_path6.join)(__dirname, "panel", "index.html"));
+      await created.loadFile((0, import_node_path7.join)(__dirname, "panel", "index.html"));
       if (ctx.signal.aborted) close();
     } catch (error) {
       logger.warn("\u6253\u5F00\u9762\u677F\u7A97\u53E3\u5931\u8D25", error instanceof Error ? error.message : String(error));
@@ -5086,13 +5346,14 @@ var plugin = {
     let qoderRuntimes = [];
     let traeStacks = [];
     let winManager = null;
+    const endpoints = createEndpointStore({ path: (0, import_node_path7.join)(cacheRoot, "endpoints.json"), logger });
     try {
-      qoderRuntimes = await createQoderRuntimes({ cacheRoot: (0, import_node_path6.join)(cacheRoot, "qoder"), logger });
+      qoderRuntimes = await createQoderRuntimes({ cacheRoot: (0, import_node_path7.join)(cacheRoot, "qoder"), logger, endpoints });
     } catch (error) {
       logger.error("Qoder \u8FD0\u884C\u65F6\u521D\u59CB\u5316\u5931\u8D25", error instanceof Error ? error.message : String(error));
     }
     try {
-      traeStacks = await createTraeStacks({ cacheRoot: (0, import_node_path6.join)(cacheRoot, "trae"), logger });
+      traeStacks = await createTraeStacks({ cacheRoot: (0, import_node_path7.join)(cacheRoot, "trae"), logger, endpoints });
     } catch (error) {
       logger.error("Trae \u8FD0\u884C\u65F6\u521D\u59CB\u5316\u5931\u8D25", error instanceof Error ? error.message : String(error));
     }
