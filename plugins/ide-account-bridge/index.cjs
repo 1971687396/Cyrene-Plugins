@@ -63,7 +63,7 @@ function createEndpointStore({ path, logger } = {}) {
     try {
       (0, import_node_fs.mkdirSync)((0, import_node_path.dirname)(path), { recursive: true });
       const tmp = `${path}.tmp`;
-      (0, import_node_fs.writeFileSync)(tmp, JSON.stringify({ version: FORMAT_VERSION, entries }, null, 2), "utf8");
+      (0, import_node_fs.writeFileSync)(tmp, JSON.stringify({ version: FORMAT_VERSION, entries }, null, 2), { encoding: "utf8", mode: 384 });
       (0, import_node_fs.renameSync)(tmp, path);
     } catch (error) {
       logger?.warn?.("ide-account-bridge: \u7AEF\u70B9\u7F13\u5B58\u5199\u5165\u5931\u8D25\uFF08\u7AEF\u53E3\u4E0E token \u5C06\u65E0\u6CD5\u8DE8\u91CD\u542F\u4FDD\u6301\uFF09", error instanceof Error ? error.message : String(error));
