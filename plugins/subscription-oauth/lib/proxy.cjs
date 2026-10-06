@@ -12,6 +12,7 @@
 const http = require("node:http");
 const { sanitizeLogText } = require("./privacy.cjs");
 const { PROVIDERS, authHeaders, chatBodyFrom, providerForModel, decodeJwtPayload } = require("./vendor-http.cjs");
+const { projectSearchResponse, prepareSearchInput, createSearchSseCompat } = require("./responses-search-compat.cjs");
 
 const DEFAULT_PORT = 6231;
 const PORT_FALLBACK_ATTEMPTS = 20;
@@ -401,6 +402,12 @@ async function handleChatCompletions(req, res, endpoint) {
     // 清掉宿主第三方搜索函数，保留其它客户端工具，再注入原生搜索工具。
     const nativeSearch = withNativeWebSearch(providerId, body);
     let upstreamBody = nativeSearch.body;
+    const responsesProtocol = endpoint === ENDPOINTS["/v1/responses"];
+    if (responsesProtocol) {
+      const prepared = prepareSearchInput(upstreamBody);
+      upstreamBody = prepared.body;
+      if (prepared.removedOrphans) log(`[proxy] 已兼容 ${prepared.removedOrphans} 条原生搜索孤立结果（普通函数工具历史保持不变）`);
+    }
     if (providerId === "chatgpt") {
       // Codex 端点强制要求 store:false（Cyrene 的 Responses transport 已带，
       // 这里兜底以防其它客户端省略）
@@ -455,8 +462,8 @@ async function handleChatCompletions(req, res, endpoint) {
     }
 
     if (body.stream) {
-      // SSE 真流式转发；ChatGPT 只缓存已完成 output item，并在空终态中补回，
-      // 让 Cyrene 能保存 function_call 后继续发送工具结果。
+      // Responses 补齐空终态后，再将服务端搜索投影成普通参考文本；
+      // 未适配宿主不会把原生搜索交给本地工具循环，普通 function_call 不变。
       res.writeHead(upstream.status, {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache",
@@ -464,7 +471,8 @@ async function handleChatCompletions(req, res, endpoint) {
       });
       if (upstream.body) {
         const reader = upstream.body.getReader();
-        const repair = providerId === "chatgpt" ? createResponsesSseRepair() : null;
+        const repair = responsesProtocol ? createResponsesSseRepair() : null;
+        const searchCompat = responsesProtocol ? createSearchSseCompat() : null;
         const decoder = repair ? new TextDecoder() : null;
         const pump = async () => {
           try {
@@ -474,7 +482,8 @@ async function handleChatCompletions(req, res, endpoint) {
               if (!value) continue;
               if (repair && decoder) {
                 const repaired = repair.push(decoder.decode(value, { stream: true }));
-                if (repaired) res.write(repaired);
+                const compatible = searchCompat ? searchCompat.push(repaired) : repaired;
+                if (compatible) res.write(compatible);
               } else {
                 res.write(Buffer.from(value));
               }
@@ -484,7 +493,8 @@ async function handleChatCompletions(req, res, endpoint) {
           } finally {
             if (repair && decoder) {
               const repaired = repair.push(decoder.decode()) + repair.flush();
-              if (repaired) res.write(repaired);
+              const compatible = searchCompat ? searchCompat.push(repaired) + searchCompat.flush() : repaired;
+              if (compatible) res.write(compatible);
             }
             res.end();
           }
@@ -504,7 +514,7 @@ async function handleChatCompletions(req, res, endpoint) {
       json(res, 502, { error: { message: `上游 ${providerId} 返回了非 JSON 内容` } });
       return;
     }
-    json(res, 200, parsed);
+    json(res, 200, responsesProtocol ? projectSearchResponse(parsed) : parsed);
   }
 
   async function handleModels(res) {
